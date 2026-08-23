@@ -113,7 +113,7 @@ func TestClarifyAtATerminalReturnsTheAnswerForThatQuestion(t *testing.T) {
 		answer, answered, err := approver.Clarify(testApproval(), "Which values file needs changing?")
 		done <- result{answer, answered, err}
 	}()
-	log.waitFor(t, "Clarification needed")
+	log.waitFor(t, "you        > ")
 	typed("charts/nginx/values.yaml\n")
 	select {
 	case got := <-done:
