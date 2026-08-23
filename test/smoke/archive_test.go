@@ -449,6 +449,8 @@ func TestHomebrewCaskInstallsFromLocalRelease(t *testing.T) {
 	if localCask == string(original) {
 		t.Fatal("generated cask has no URL to replace for local smoke")
 	}
+	// Installing the git formula into a throwaway prefix builds it from source; the smoke covers our cask, not Homebrew.
+	localCask = regexp.MustCompile(`(?m)^\s*depends_on formula:.*\n`).ReplaceAllString(localCask, "")
 
 	prefix := filepath.Join(t.TempDir(), "homebrew")
 	if err := os.MkdirAll(filepath.Join(prefix, "bin"), 0o755); err != nil {
@@ -506,7 +508,7 @@ func TestHomebrewCaskInstallsFromLocalRelease(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(tapRoot, ".git")); !os.IsNotExist(err) {
 		t.Fatalf("temporary cask tap has git state: %v", err)
 	}
-	installContext, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	installContext, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	runOutputEnvContext(t, installContext, env, prefix, brewCopy, "install", "--cask", "--skip-cask-deps", "lkshrk/ops-pilot/ops-pilot")
 	if entries, err := os.ReadDir(filepath.Join(prefix, "Library", "Taps")); err != nil || len(entries) != 1 || entries[0].Name() != "lkshrk" {

@@ -21,7 +21,7 @@ crane_version=$(pin CRANE_VERSION)
 registry_image=$(pin REGISTRY_IMAGE)
 case "$(uname -m)" in
 	x86_64|amd64) crane_arch=amd64; crane_asset=x86_64 ;;
-	aarch64|arm64) crane_arch=arm64; crane_asset=aarch64 ;;
+	aarch64|arm64) crane_arch=arm64; crane_asset=arm64 ;;
 	*) die "unsupported runner architecture: $(uname -m)" ;;
 esac
 crane_sha=$(pin "CRANE_LINUX_$(printf '%s' "$crane_arch" | tr a-z A-Z)_SHA256")
