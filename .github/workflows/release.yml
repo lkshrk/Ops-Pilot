@@ -351,12 +351,15 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$HOMEBREW_TAP_TOKEN" || { echo 'HOMEBREW_TAP_TOKEN secret is not set' >&2; exit 1; }
+          push=$(curl --silent --show-error --fail \
+            --header "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
+            --header "Accept: application/vnd.github+json" \
+            "${GITHUB_API_URL}/repos/lkshrk/homebrew-tap" | jq -r '.permissions.push')
+          test "$push" = true || { echo "HOMEBREW_TAP_TOKEN cannot push to lkshrk/homebrew-tap (permissions.push=$push)" >&2; exit 1; }
           cask=candidate-a/dist/homebrew/Casks/ops-pilot.rb
           tap=$(mktemp -d "${RUNNER_TEMP}/homebrew-tap.XXXXXX")
           trap 'rm -rf "$tap"' EXIT
-          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$HOMEBREW_TAP_TOKEN" | base64 -w0)"
-          git -c "http.https://github.com/.extraheader=$auth" \
-            clone --quiet --depth 1 https://github.com/lkshrk/homebrew-tap.git "$tap"
+          git clone --quiet --depth 1 "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/lkshrk/homebrew-tap.git" "$tap"
           if cmp -s "$cask" "$tap/Casks/ops-pilot.rb"; then
             echo 'tap already carries this cask'
             exit 0
@@ -364,8 +367,7 @@ jobs:
           install -m 0644 "$cask" "$tap/Casks/ops-pilot.rb"
           git -C "$tap" -c user.name=github-actions -c user.email=github-actions@github.com \
             commit --quiet --all --message "ops-pilot ${GITHUB_REF_NAME}"
-          git -C "$tap" -c "http.https://github.com/.extraheader=$auth" \
-            push --quiet origin HEAD
+          git -C "$tap" push --quiet origin HEAD
   verify-published:
     name: verify-published
     needs: publish
