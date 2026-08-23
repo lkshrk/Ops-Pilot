@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  unit-contract-ubuntu:
+    name: unit-contract ubuntu-24.04
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: 1.26.6
+      - name: Verify
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go tool staticcheck ./...
+          go tool govulncheck ./...
+          go test -race -covermode=atomic -coverprofile=coverage.out ./...
+          scripts/check-workflow-pins.sh
+          scripts/test-check-workflow-pins.sh
+          scripts/test-check-release-candidate.sh
+          scripts/test-build-release-candidate.sh
+          scripts/test-smoke-release-candidate.sh
+          scripts/test-check-publish-state.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: coverage
+          path: coverage.out
+  unit-contract-macos-intel:
+    name: unit-contract macos-15-intel
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: 1.26.6
+      - run: go test ./...
+  unit-contract-macos-arm:
+    name: unit-contract macos-15
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: 1.26.6
+      - run: go test ./...
+  ci:
+    name: ci
+    needs:
+      - unit-contract-ubuntu
+      - unit-contract-macos-intel
+      - unit-contract-macos-arm
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: coverage
+      - run: test -f coverage.out

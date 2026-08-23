@@ -1,0 +1,92 @@
+# RBAC for the ops-pilot ServiceAccount.
+#
+# Ops-Pilot reads cluster health to attribute a merge, and triggers Flux to
+# fetch now rather than at its next interval. It writes nothing else: every
+# repository change goes through the GitHub API, never the cluster.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ops-pilot
+rules:
+  # Health snapshot: every Flux object, cluster-wide.
+  - apiGroups: [kustomize.toolkit.fluxcd.io]
+    resources: [kustomizations]
+    verbs: [get, list]
+  - apiGroups: [helm.toolkit.fluxcd.io]
+    resources: [helmreleases]
+    verbs: [get, list]
+  - apiGroups: [source.toolkit.fluxcd.io]
+    resources: [gitrepositories]
+    verbs: [get, list]
+
+  # Health snapshot: workload readiness.
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, daemonsets]
+    verbs: [list]
+
+  # Diagnosis: what a failing workload is actually doing.
+  - apiGroups: [""]
+    resources: [pods, events]
+    verbs: [list]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+
+  # Diagnosis: the intermediate objects a pod's owner chain passes through.
+  # Without these the chain is guessed from generated names, not followed.
+  - apiGroups: [apps]
+    resources: [replicasets]
+    verbs: [list]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [list]
+---
+# The only cluster write ops-pilot makes: annotating the configured
+# GitRepository with reconcile.fluxcd.io/requestedAt. Scoped to that one object
+# by name, in the one namespace holding it.
+#
+# Applying this through a Flux Kustomization: do not set targetNamespace. It
+# overrides metadata.namespace on every object here, which would move this Role
+# out of flux-system and silently break the reconcile trigger.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ops-pilot-reconcile
+  # SET ME: flux.source.namespace from your ops-pilot.yaml.
+  namespace: flux-system
+rules:
+  - apiGroups: [source.toolkit.fluxcd.io]
+    resources: [gitrepositories]
+    # SET ME: flux.source.name from your ops-pilot.yaml.
+    resourceNames: [flux-system]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ops-pilot
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ops-pilot
+subjects:
+  # SET ME: the ServiceAccount ops-pilot runs as, and its namespace.
+  - kind: ServiceAccount
+    name: ops-pilot
+    namespace: tools
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ops-pilot-reconcile
+  # SET ME: flux.source.namespace, the same value as the Role above.
+  namespace: flux-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ops-pilot-reconcile
+subjects:
+  # SET ME: the same ServiceAccount and namespace as the binding above.
+  - kind: ServiceAccount
+    name: ops-pilot
+    namespace: tools

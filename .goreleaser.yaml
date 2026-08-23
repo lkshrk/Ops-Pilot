@@ -1,0 +1,81 @@
+version: 2
+
+project_name: ops-pilot
+
+builds:
+  - id: ops-pilot
+    main: ./cmd/ops-pilot
+    binary: ops-pilot
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .FullCommit }}
+      - -X main.buildDate={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: release
+    ids:
+      - ops-pilot
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    builds_info:
+      mode: 0755
+      mtime: "{{ .CommitDate }}"
+    files:
+      - src: README.md
+        dst: README.md
+        info:
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
+      - src: docs/install.md
+        dst: docs/install.md
+        info:
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
+      - src: docs/configuration.md
+        dst: docs/configuration.md
+        info:
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
+      - src: docs/cli.md
+        dst: docs/cli.md
+        info:
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+  ids:
+    - release
+
+sboms:
+  - id: archives
+    artifacts: archive
+    ids:
+      - release
+
+homebrew_casks:
+  - name: ops-pilot
+    repository:
+      owner: lkshrk
+      name: homebrew-tap
+    ids:
+      - release
+    binaries:
+      - ops-pilot
+    custom_block: |
+      depends_on formula: "git"
+    skip_upload: true

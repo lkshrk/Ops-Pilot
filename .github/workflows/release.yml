@@ -1,0 +1,418 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - v*
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.repository }}-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  verify-release:
+    name: verify-release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Verify signed reachable annotated tag
+        run: |
+          set -euo pipefail
+          tag=$(git describe --exact-match --match 'v*' HEAD)
+          printf '%s' "$tag" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          test "$(git cat-file -t "refs/tags/$tag")" = tag
+          git -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=.github/release-signers verify-tag "$tag"
+          git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          git merge-base --is-ancestor "refs/tags/$tag^{}" refs/remotes/origin/main
+  unit-contract:
+    name: release unit-contract
+    needs: verify-release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: 1.26.6
+      - run: |
+          test "$(go env GOVERSION)" = "go$(sed -n 's/^GO_VERSION=//p' build/tool-versions.env)"
+          go test ./...
+  candidate-a:
+    name: candidate-a
+    needs: verify-release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Load pinned tool manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r line; do
+            [[ "$line" =~ ^[A-Z][A-Z0-9_]*=[A-Za-z0-9._:/@+-]+$ ]] || exit 1
+            printf '%s\n' "$line"
+          done < build/tool-versions.env >> "$GITHUB_ENV"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: 1.26.6
+      - name: Install pinned packaging tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(go env GOVERSION)" = "go${GO_VERSION}"
+          tools="${RUNNER_TEMP}/ops-pilot-packaging-tools"
+          mkdir -p "$tools"
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --output "$tools/goreleaser.tar.gz" \
+            "https://github.com/goreleaser/goreleaser/releases/download/${GORELEASER_VERSION}/goreleaser_Linux_x86_64.tar.gz"
+          printf '%s  %s\n' "$GORELEASER_LINUX_AMD64_SHA256" "$tools/goreleaser.tar.gz" | sha256sum --check
+          tar -xzf "$tools/goreleaser.tar.gz" -C "$tools" goreleaser
+          test "$("$tools/goreleaser" --version | awk '$1 == "GitVersion:" { print $2 }')" = "$GORELEASER_VERSION"
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --output "$tools/syft.tar.gz" \
+            "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          printf '%s  %s\n' "$SYFT_LINUX_AMD64_SHA256" "$tools/syft.tar.gz" | sha256sum --check
+          tar -xzf "$tools/syft.tar.gz" -C "$tools" syft
+          test "$("$tools/syft" version | awk '$1 == "Version:" { print $2 }')" = "$SYFT_VERSION"
+          printf '%s\n' "$tools" >> "$GITHUB_PATH"
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8
+        with:
+          image: docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: arm64
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+        with:
+          version: v0.34.1
+          driver: docker-container
+          driver-opts: |
+            image=docker.io/moby/buildkit:v0.30.0@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f
+          keep-state: false
+      - name: Build candidate
+        run: OPS_PILOT_PROTECTED_DEFAULT_BRANCH=main scripts/build-release-candidate.sh candidate-a
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: candidate-a
+          path: candidate-a
+  candidate-b:
+    name: candidate-b
+    needs: verify-release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Load pinned tool manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r line; do
+            [[ "$line" =~ ^[A-Z][A-Z0-9_]*=[A-Za-z0-9._:/@+-]+$ ]] || exit 1
+            printf '%s\n' "$line"
+          done < build/tool-versions.env >> "$GITHUB_ENV"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: 1.26.6
+      - name: Install pinned packaging tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(go env GOVERSION)" = "go${GO_VERSION}"
+          tools="${RUNNER_TEMP}/ops-pilot-packaging-tools"
+          mkdir -p "$tools"
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --output "$tools/goreleaser.tar.gz" \
+            "https://github.com/goreleaser/goreleaser/releases/download/${GORELEASER_VERSION}/goreleaser_Linux_x86_64.tar.gz"
+          printf '%s  %s\n' "$GORELEASER_LINUX_AMD64_SHA256" "$tools/goreleaser.tar.gz" | sha256sum --check
+          tar -xzf "$tools/goreleaser.tar.gz" -C "$tools" goreleaser
+          test "$("$tools/goreleaser" --version | awk '$1 == "GitVersion:" { print $2 }')" = "$GORELEASER_VERSION"
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --output "$tools/syft.tar.gz" \
+            "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          printf '%s  %s\n' "$SYFT_LINUX_AMD64_SHA256" "$tools/syft.tar.gz" | sha256sum --check
+          tar -xzf "$tools/syft.tar.gz" -C "$tools" syft
+          test "$("$tools/syft" version | awk '$1 == "Version:" { print $2 }')" = "$SYFT_VERSION"
+          printf '%s\n' "$tools" >> "$GITHUB_PATH"
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8
+        with:
+          image: docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: arm64
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+        with:
+          version: v0.34.1
+          driver: docker-container
+          driver-opts: |
+            image=docker.io/moby/buildkit:v0.30.0@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f
+          keep-state: false
+      - name: Build candidate
+        run: OPS_PILOT_PROTECTED_DEFAULT_BRANCH=main scripts/build-release-candidate.sh candidate-b
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: candidate-b
+          path: candidate-b
+  compare:
+    name: compare
+    needs:
+      - candidate-a
+      - candidate-b
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: candidate-a
+          path: candidate-a
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: candidate-b
+          path: candidate-b
+      - run: scripts/check-release-candidate.py candidate-a --compare candidate-b
+      - run: |
+          scripts/test-check-workflow-pins.sh
+          scripts/test-check-release-candidate.sh
+          scripts/test-build-release-candidate.sh
+          scripts/test-smoke-release-candidate.sh
+          scripts/test-check-publish-state.sh
+  container-smoke-amd64:
+    name: container-smoke linux-amd64
+    needs: compare
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: candidate-a
+          path: candidate-a
+      - run: scripts/smoke-release-candidate.sh candidate-a linux/amd64
+  container-smoke-arm64:
+    name: container-smoke linux-arm64
+    needs: compare
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: candidate-a
+          path: candidate-a
+      - run: scripts/smoke-release-candidate.sh candidate-a linux/arm64
+  cask-smoke-intel:
+    name: cask-smoke macos-15-intel
+    needs: compare
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: 1.26.6
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: candidate-a
+          path: candidate-a
+      - name: Install candidate cask
+        run: |
+          test "$(go env GOVERSION)" = "go$(sed -n 's/^GO_VERSION=//p' build/tool-versions.env)"
+          test ! -e dist
+          cp -R candidate-a/dist dist
+          OPS_PILOT_REQUIRE_CASK_SMOKE=1 go test -race ./test/smoke \
+            -run '^TestHomebrewCaskInstallsFromLocalRelease$' -count=1 -timeout=15m
+  cask-smoke-arm:
+    name: cask-smoke macos-15
+    needs: compare
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: 1.26.6
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: candidate-a
+          path: candidate-a
+      - name: Install candidate cask
+        run: |
+          test "$(go env GOVERSION)" = "go$(sed -n 's/^GO_VERSION=//p' build/tool-versions.env)"
+          test ! -e dist
+          cp -R candidate-a/dist dist
+          OPS_PILOT_REQUIRE_CASK_SMOKE=1 go test -race ./test/smoke \
+            -run '^TestHomebrewCaskInstallsFromLocalRelease$' -count=1 -timeout=15m
+  publish:
+    name: publish
+    needs:
+      - unit-contract
+      - container-smoke-amd64
+      - container-smoke-arm64
+      - cask-smoke-intel
+      - cask-smoke-arm
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: candidate-a
+          path: candidate-a
+      - name: Validate candidate before credentials
+        run: scripts/check-release-candidate.py candidate-a
+      - name: Load pinned tool manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r line; do
+            [[ "$line" =~ ^[A-Z][A-Z0-9_]*=[A-Za-z0-9._:/@+-]+$ ]] || exit 1
+            printf '%s\n' "$line"
+          done < build/tool-versions.env >> "$GITHUB_ENV"
+      - name: Install pinned Crane
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools="${RUNNER_TEMP}/ops-pilot-publish-tools"
+          mkdir -p "$tools"
+          archive="$tools/crane.tar.gz"
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --output "$archive" \
+            "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+          printf '%s  %s\n' "$CRANE_LINUX_AMD64_SHA256" "$archive" | sha256sum --check
+          tar -xzf "$archive" -C "$tools" crane
+          test "$("$tools/crane" version)" = "$CRANE_VERSION"
+          printf '%s\n' "$tools" >> "$GITHUB_PATH"
+      - uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check release presence
+        id: release-state
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          status=$(curl --silent --show-error --output "${RUNNER_TEMP}/release.json" \
+            --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${GITHUB_TOKEN}" \
+            --header "Accept: application/vnd.github+json" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}")
+          case "$status" in
+            200) printf '%s\n' 'exists=true' >> "$GITHUB_OUTPUT" ;;
+            404) printf '%s\n' 'exists=false' >> "$GITHUB_OUTPUT" ;;
+            *) printf 'release lookup returned HTTP %s\n' "$status" >&2; exit 1 ;;
+          esac
+      - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
+        if: steps.release-state.outputs.exists == 'false'
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+      - name: Publish absent immutable artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_REF_NAME}"
+          state=$(scripts/check-publish-state.sh candidate-a)
+          ghcr_line=$(printf 'ghcr\t%s' "$image")
+          if printf '%s\n' "$state" | grep -Fx "$ghcr_line" >/dev/null; then
+            layout=$(mktemp -d "${RUNNER_TEMP}/ops-pilot-oci.XXXXXX")
+            trap 'rm -rf "$layout"' EXIT
+            tar -xf candidate-a/dist/ops-pilot-oci.tar -C "$layout"
+            scripts/check-publish-state.sh candidate-a | grep -Fx "$ghcr_line" >/dev/null
+            crane push --index "$layout" "$image"
+          fi
+
+          remaining=100
+          while test "$remaining" -gt 0; do
+            state=$(scripts/check-publish-state.sh candidate-a)
+            asset=$(printf '%s\n' "$state" | awk -F '\t' '$1 == "asset" && NF == 2 { print $2; exit }')
+            test -n "$asset" || break
+            test -f "candidate-a/dist/$asset"
+            asset_line=$(printf 'asset\t%s' "$asset")
+            scripts/check-publish-state.sh candidate-a | grep -Fx "$asset_line" >/dev/null
+            gh release upload "$GITHUB_REF_NAME" "candidate-a/dist/$asset"
+            remaining=$((remaining - 1))
+          done
+          test "$remaining" -gt 0
+          scripts/check-publish-state.sh candidate-a > "${RUNNER_TEMP}/publish-state-final"
+          test ! -s "${RUNNER_TEMP}/publish-state-final"
+      - name: Publish cask to lkshrk/homebrew-tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOMEBREW_TAP_TOKEN" || { echo 'HOMEBREW_TAP_TOKEN secret is not set' >&2; exit 1; }
+          cask=candidate-a/dist/homebrew/Casks/ops-pilot.rb
+          tap=$(mktemp -d "${RUNNER_TEMP}/homebrew-tap.XXXXXX")
+          trap 'rm -rf "$tap"' EXIT
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$HOMEBREW_TAP_TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=$auth" \
+            clone --quiet --depth 1 https://github.com/lkshrk/homebrew-tap.git "$tap"
+          if cmp -s "$cask" "$tap/Casks/ops-pilot.rb"; then
+            echo 'tap already carries this cask'
+            exit 0
+          fi
+          install -m 0644 "$cask" "$tap/Casks/ops-pilot.rb"
+          git -C "$tap" -c user.name=github-actions -c user.email=github-actions@github.com \
+            commit --quiet --all --message "ops-pilot ${GITHUB_REF_NAME}"
+          git -C "$tap" -c "http.https://github.com/.extraheader=$auth" \
+            push --quiet origin HEAD
+  verify-published:
+    name: verify-published
+    needs: publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: candidate-a
+          path: candidate-a
+      - name: Validate downloaded candidate before credentials
+        run: scripts/check-release-candidate.py candidate-a
+      - name: Load pinned tool manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r line; do
+            [[ "$line" =~ ^[A-Z][A-Z0-9_]*=[A-Za-z0-9._:/@+-]+$ ]] || exit 1
+            printf '%s\n' "$line"
+          done < build/tool-versions.env >> "$GITHUB_ENV"
+      - name: Install pinned Crane
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools="${RUNNER_TEMP}/ops-pilot-verify-tools"
+          mkdir -p "$tools"
+          archive="$tools/crane.tar.gz"
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --output "$archive" \
+            "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+          printf '%s  %s\n' "$CRANE_LINUX_AMD64_SHA256" "$archive" | sha256sum --check
+          tar -xzf "$archive" -C "$tools" crane
+          test "$("$tools/crane" version)" = "$CRANE_VERSION"
+          printf '%s\n' "$tools" >> "$GITHUB_PATH"
+      - uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify published state is complete
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          scripts/check-publish-state.sh candidate-a > "${RUNNER_TEMP}/publish-state-final"
+          test ! -s "${RUNNER_TEMP}/publish-state-final"

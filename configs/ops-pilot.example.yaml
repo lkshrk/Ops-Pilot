@@ -1,0 +1,44 @@
+repository:
+  owner: lkshrk
+  name: h-cloud
+  branch: main
+pullRequests:
+  authors: ['renovate[bot]']
+  labels: [dependencies]
+  revertedLabel: ops-pilot/reverted
+  declinedLabel: ops-pilot/declined
+github:
+  tokenEnv: GITHUB_TOKEN
+  mergeMethod: squash
+cluster:
+  context: h-cloud
+flux:
+  source: {namespace: flux-system, name: flux-system}
+logging:
+  level: info
+ai:
+  provider: openai
+  model: gpt-5.1
+  baseURL: https://api.openai.com/v1
+  apiKeyEnv: OPENAI_API_KEY
+watch:
+  settleTimeout: 10m
+  # stabilityHold must exceed the retryInterval of the objects a merge can touch,
+  # or this 1m reverts merges Flux would have fixed: docs/configuration.md#watch
+  stabilityHold: 1m
+  pollInterval: 10s
+  maxFixAttempts: 2
+fixes:
+  allowedPaths:
+    - kubernetes/apps/**
+    - clusters/staging/**
+changelog:
+  overrides:
+    - {dependency: ghcr.io/example/chart, repository: example/chart}
+# Only for private registries. Every listed passwordEnv must be set, or startup
+# fails; public registries are read anonymously and need no entry here.
+# registries:
+#   - {host: ghcr.io, username: lkshrk, passwordEnv: GHCR_TOKEN}
+paths:
+  historyDatabase: .ops-pilot/history.db
+  checkoutDirectory: .ops-pilot/checkouts
