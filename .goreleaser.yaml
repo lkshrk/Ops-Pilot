@@ -76,6 +76,8 @@ homebrew_casks:
       - release
     binaries:
       - ops-pilot
+    description: Merges, watches and reverts Renovate updates in a Flux GitOps repository
+    homepage: https://github.com/lkshrk/Ops-Pilot
     custom_block: |
       depends_on formula: "git"
     skip_upload: true

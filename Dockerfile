@@ -54,7 +54,7 @@ RUN set -eux; \
       "git=${GIT_PACKAGE_VERSION}"; \
     test "$(git --version)" = "git version 2.39.5"; \
     test -s /usr/share/doc/git/copyright; \
-    rm -rf /var/lib/apt/lists/*; \
+    rm -rf /var/lib/apt/lists/* /var/log/apt /var/log/dpkg.log /var/log/alternatives.log /var/cache/ldconfig/aux-cache; \
     printf '%s\n' 'ops-pilot:x:65532:65532:Ops Pilot:/home/ops-pilot:/usr/sbin/nologin' >> /etc/passwd; \
     printf '%s\n' 'ops-pilot:x:65532:' >> /etc/group; \
     mkdir -p \

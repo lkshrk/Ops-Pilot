@@ -87,10 +87,10 @@ cd "$worktree"
 SOURCE_DATE_EPOCH=$epoch BUILDKIT_MULTI_PLATFORM=1 goreleaser release --clean --skip=publish
 [ -d dist ] && [ ! -L dist ] || die "GoReleaser did not produce dist"
 mv dist "$output/dist"
-SOURCE_DATE_EPOCH=$epoch BUILDKIT_MULTI_PLATFORM=1 docker buildx build --builder "$builder" --platform linux/amd64,linux/arm64 --build-arg "VERSION=$version" --build-arg "COMMIT=$head" --build-arg "BUILD_DATE=$build_date" --provenance=false --sbom=false --output "type=oci,dest=$output/dist/ops-pilot-oci.tar" -f Dockerfile .
+SOURCE_DATE_EPOCH=$epoch BUILDKIT_MULTI_PLATFORM=1 docker buildx build --builder "$builder" --platform linux/amd64,linux/arm64 --build-arg "VERSION=$version" --build-arg "COMMIT=$head" --build-arg "BUILD_DATE=$build_date" --provenance=false --sbom=false --output "type=oci,rewrite-timestamp=true,dest=$output/dist/ops-pilot-oci.tar" -f Dockerfile .
 
-python3 - "$output" <<'PY'
-import hashlib, json, shutil, sys, tarfile
+python3 - "$output" "$epoch" <<'PY'
+import hashlib, io, json, shutil, sys, tarfile
 from pathlib import Path
 root = Path(sys.argv[1]); dist = root / "dist"
 archive_suffix = ".tar.gz"
@@ -172,10 +172,31 @@ for name, kind in (("checksums.txt", "Checksum"), ("homebrew/Casks/ops-pilot.rb"
     records.append(record)
 (dist / "artifacts.json").write_text(json.dumps(sorted(records, key=lambda record: record["path"]), sort_keys=True, separators=(",", ":")) + "\n")
 
-with tarfile.open(dist / "ops-pilot-oci.tar", "r:") as archive:
-    source = archive.extractfile("index.json")
-    if source is None: raise SystemExit("build-release-candidate: OCI index missing")
-    index_bytes = source.read()
+oci_path = dist / "ops-pilot-oci.tar"
+with tarfile.open(oci_path, "r:") as archive:
+    members = {m.name: (m, archive.extractfile(m).read() if m.isfile() else None) for m in archive.getmembers()}
+if "index.json" not in members or members["index.json"][1] is None: raise SystemExit("build-release-candidate: OCI index missing")
+index_bytes = members["index.json"][1]
+outer = json.loads(index_bytes)
+descriptors = outer.get("manifests") if isinstance(outer, dict) else None
+# BuildKit's OCI exporter wraps the platform index in a one-entry outer index; publish the platform index itself.
+if isinstance(descriptors, list) and len(descriptors) == 1 and descriptors[0].get("mediaType") == "application/vnd.oci.image.index.v1+json":
+    nested = "blobs/sha256/" + descriptors[0]["digest"].removeprefix("sha256:")
+    if nested not in members or members[nested][1] is None: raise SystemExit("build-release-candidate: nested OCI index blob missing")
+    index_bytes = members[nested][1]
+    members["index.json"] = (members["index.json"][0], index_bytes)
+    del members[nested]
+    epoch = int(sys.argv[2])
+    with tarfile.open(oci_path, "w:", format=tarfile.PAX_FORMAT) as archive:
+        for name in sorted(members):
+            member, data = members[name]
+            info = tarfile.TarInfo(name)
+            info.type = member.type; info.mode = 0o755 if member.isdir() else 0o644
+            info.mtime = epoch; info.uid = info.gid = 0; info.uname = info.gname = ""
+            if data is not None:
+                info.size = len(data); archive.addfile(info, io.BytesIO(data))
+            else:
+                archive.addfile(info)
 index = json.loads(index_bytes); platforms = {}
 for descriptor in index.get("manifests", []):
     platform = descriptor.get("platform", {}); key = f"{platform.get('os')}/{platform.get('architecture')}"

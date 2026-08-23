@@ -92,7 +92,7 @@ case "$*" in
       *'--build-arg VERSION=1.2.3 --build-arg COMMIT=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --build-arg BUILD_DATE=2023-11-14T22:13:20Z '*) ;;
       *) echo "wrong or missing release build arguments: $*" >&2; exit 8 ;;
     esac
-    dest=$(printf '%s\n' "$*" | sed -n 's/.*type=oci,dest=\([^ ]*\).*/\1/p')
+    dest=$(printf '%s\n' "$*" | sed -n 's/.*type=oci,rewrite-timestamp=true,dest=\([^ ]*\).*/\1/p')
     DEST=$dest python3 - <<'PY'
 import hashlib, io, json, os, tarfile
 def digest(data): return 'sha256:'+hashlib.sha256(data).hexdigest()
@@ -133,7 +133,7 @@ grep -F 'worktree remove --force ' "$log" >/dev/null
 grep -F 'goreleaser release --clean --skip=publish' "$log" >/dev/null
 grep -F 'docker buildx create --name ' "$log" | grep -F -- '--driver docker-container --driver-opt image=docker.io/moby/buildkit:v0.30.0@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f' >/dev/null
 grep -F 'docker buildx inspect --bootstrap ' "$log" >/dev/null
-grep -F 'docker buildx build ' "$log" | grep -F -- '--platform linux/amd64,linux/arm64 --build-arg VERSION=1.2.3 --build-arg COMMIT=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --build-arg BUILD_DATE=2023-11-14T22:13:20Z --provenance=false --sbom=false --output type=oci,dest=' >/dev/null
+grep -F 'docker buildx build ' "$log" | grep -F -- '--platform linux/amd64,linux/arm64 --build-arg VERSION=1.2.3 --build-arg COMMIT=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --build-arg BUILD_DATE=2023-11-14T22:13:20Z --provenance=false --sbom=false --output type=oci,rewrite-timestamp=true,dest=' >/dev/null
 grep -F 'docker buildx rm -f ' "$log" >/dev/null
 python3 - "$candidate/dist/oci-identity.json" "$candidate/dist/artifacts.json" "$candidate/dist" <<'PY'
 import json, sys
