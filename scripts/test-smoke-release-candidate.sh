@@ -52,7 +52,7 @@ cat >"$tmp/crane" <<'SH'
 set -eu
 printf 'crane %s\n' "$*" >>"$OPS_PILOT_TEST_LOG"
 case "$1" in
-  version) printf '%s\n' "${OPS_PILOT_TEST_CRANE_VERSION:-v0.21.7}" ;;
+  version) printf '%s\n' "${OPS_PILOT_TEST_CRANE_VERSION:-0.21.7}" ;;
   push) exit 0 ;;
   digest)
     case " $* " in
@@ -125,7 +125,7 @@ cp "$repo/build/tool-versions.env" "$tmp/tool-versions.good"
 printf '%s\n' 'CRANE_VERSION=v0.21.7' "CRANE_LINUX_AMD64_SHA256=$(printf 0%.0s $(seq 1 64))" "CRANE_LINUX_ARM64_SHA256=$(printf 0%.0s $(seq 1 64))" >"$repo/build/tool-versions.env"
 if run "$tmp/candidate" linux/amd64 >/dev/null 2>&1; then echo 'expected checksum rejection' >&2; exit 1; fi
 cp "$tmp/tool-versions.good" "$repo/build/tool-versions.env"
-if OPS_PILOT_TEST_CRANE_VERSION=v0.0.0 PATH="$tmp/bin:$PATH" OPS_PILOT_TEST_LOG=$log OPS_PILOT_TEST_CRANE_ARCHIVE=$tmp/crane.tar.gz OPS_PILOT_TEST_ROOT_DIGEST=$root_digest OPS_PILOT_TEST_AMD64_DIGEST=$amd64_digest OPS_PILOT_TEST_ARM64_DIGEST=$arm64_digest "$repo/scripts/smoke-release-candidate.sh" "$tmp/candidate" linux/amd64 >/dev/null 2>&1; then echo 'expected version rejection' >&2; exit 1; fi
+if OPS_PILOT_TEST_CRANE_VERSION=0.0.0 PATH="$tmp/bin:$PATH" OPS_PILOT_TEST_LOG=$log OPS_PILOT_TEST_CRANE_ARCHIVE=$tmp/crane.tar.gz OPS_PILOT_TEST_ROOT_DIGEST=$root_digest OPS_PILOT_TEST_AMD64_DIGEST=$amd64_digest OPS_PILOT_TEST_ARM64_DIGEST=$arm64_digest "$repo/scripts/smoke-release-candidate.sh" "$tmp/candidate" linux/amd64 >/dev/null 2>&1; then echo 'expected version rejection' >&2; exit 1; fi
 if OPS_PILOT_TEST_ROOT_DIGEST=sha256:bad PATH="$tmp/bin:$PATH" OPS_PILOT_TEST_LOG=$log OPS_PILOT_TEST_CRANE_ARCHIVE=$tmp/crane.tar.gz OPS_PILOT_TEST_AMD64_DIGEST=$amd64_digest OPS_PILOT_TEST_ARM64_DIGEST=$arm64_digest "$repo/scripts/smoke-release-candidate.sh" "$tmp/candidate" linux/amd64 >/dev/null 2>&1; then echo 'expected digest mismatch rejection' >&2; exit 1; fi
 [ "$(grep -Fc 'docker rm -f registry-id' "$log")" -eq 2 ]
 printf '%s\n' 'smoke-release-candidate: PASS'

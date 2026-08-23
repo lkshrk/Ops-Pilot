@@ -35,7 +35,7 @@ cat >"$tmp/bin/goreleaser" <<'SH'
 set -eu
 printf 'goreleaser %s\n' "$*" >>"$OPS_PILOT_TEST_LOG"
 case "$*" in
-  --version) echo 'goreleaser version v2.17.0' ;;
+  --version) printf 'GitVersion:    2.17.0\nGoVersion:     go1.26.4\n' ;;
   'release --clean --skip=publish')
     python3 - <<'PY'
 import gzip, hashlib, io, json, tarfile

@@ -79,3 +79,6 @@ homebrew_casks:
     custom_block: |
       depends_on formula: "git"
     skip_upload: true
+
+changelog:
+  disable: true

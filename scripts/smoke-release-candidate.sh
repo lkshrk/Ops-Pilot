@@ -45,7 +45,7 @@ mkdir "$tmp/crane"
 tar -xzf "$crane_archive" -C "$tmp/crane" crane
 crane=$tmp/crane/crane
 [ -x "$crane" ] || die "Crane archive missing executable"
-[ "$("$crane" version)" = "$crane_version" ] || die "unexpected Crane version"
+[ "$("$crane" version)" = "${crane_version#v}" ] || die "unexpected Crane version"
 
 layout=$tmp/layout
 python3 - "$candidate/dist/ops-pilot-oci.tar" "$layout" <<'PY'

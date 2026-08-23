@@ -20,7 +20,7 @@ awk -F= '/^$|^#/ { next } { if (seen[$1]++) exit 1 }' "$pins" || die "duplicate 
 pin() { awk -F= -v key="$1" '$1 == key { if (++n == 1) print substr($0, length(key) + 2); else exit 1 } END { exit n != 1 }' "$pins" || die "missing or duplicate pin: $1"; }
 buildx_version=$(pin BUILDX_VERSION)
 buildkit_image=$(pin BUILDKIT_IMAGE)
-goreleaser_version=$(pin GORELEASER_VERSION)
+goreleaser_version=$(pin GORELEASER_VERSION); goreleaser_version=${goreleaser_version#v}
 
 head=$(git -C "$root" rev-parse --verify HEAD) || die "cannot resolve HEAD"
 tag=
